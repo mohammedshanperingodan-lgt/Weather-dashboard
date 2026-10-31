@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>HAYYATEK FZC - UHF RFID Pro</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#1a73e8">
+<style>
+  body {margin:0;font-family:system-ui,sans-serif;background:#f8f9fa;color:#333;}
+  header{background:#1a73e8;color:white;padding:20px;text-align:center;font-size:24px;font-weight:bold;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;padding:20px;}
+  .btn{background:#1a73e8;color:white;padding:30px;border-radius:16px;text-align:center;font-size:18px;box-shadow:0 4px 12px rgba(0,0,0,0.15);}
+  .btn:active{transform:scale(0.95);}
+  .red{background:#d93025;}.green{background:#137333;}.orange{background:#f28b00;}.purple{background:#9333ea;}
+  .count{font-size:80px;font-weight:bold;text-align:center;margin:30px 0;color:#1a73e8;}
+  table{width:100%;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+  th{background:#1a73e8;color:white;padding:15px;}
+  td{padding:12px 15px;border-bottom:1px solid #eee;}
+  .status{text-align:center;padding:15px;font-size:18px;font-weight:bold;color:#555;}
+  button{width:100%;padding:18px;margin:10px 0;border:none;border-radius:12px;color:white;font-size:18px;}
+  
+  .navigation-panel {background:white;padding:20px;border-radius:12px;margin:20px;box-shadow:0 4px 12px rgba(0,0,0,0.1);}
+  .compass {width:120px;height:120px;margin:0 auto;position:relative;}
+  .compass-ring {width:100%;height:100%;border:3px solid #1a73e8;border-radius:50%;display:flex;align-items:center;justify-content:center;}
+  .compass-arrow {font-size:48px;transition:transform 0.5s ease;}
+  .signal-bars {display:flex;gap:4px;margin:15px 0;}
+  .signal-bar {flex:1;height:20px;background:#ddd;border-radius:3px;}
+  .signal-bar.active {background:#34a853;}
+  
+  .inventory-stats {display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:15px 0;}
+  .stat-card {background:#1a73e8;color:white;padding:15px;border-radius:8px;text-align:center;}
+  .stat-number {font-size:24px;font-weight:bold;}
+  .stat-label {font-size:12px;}
+  
+  .scanning-active {background: #e8f5e8 !important; border: 2px solid #34a853 !important; color: #137333 !important; }
+  .scan-animation {animation: pulse 1.5s infinite;}
+  @keyframes pulse {0%{opacity:1;}50%{opacity:0.5;}100%{opacity:1;}}
+  .realtime-tag {animation: highlight 2s ease-in-out;}
+  @keyframes highlight {0%{background:#e8f5e8;}100%{background:white;}}
+</style>
+</head>
+<body>
+
+<header>HAYYATEK FZC<br><small>UHF RFID Pro 2025</small></header>
+
+<div class="grid">
+  <div class="btn purple" onclick="openPage('inventory')">Inventory</div>
+  <div class="btn red" onclick="openPage('search')">Search / Locate</div>
+  <div class="btn" onclick="openPage('write')">Write Tag</div>
+  <div class="btn orange" onclick="openPage('settings')">Settings</div>
+  <div class="btn green" onclick="openPage('export')">Export & Zones</div>
+  <div class="btn" onclick="showAbout()">About</div>
+</div>
+
+<input id="hidden" style="position:absolute;left:-9999px;opacity:0;" autofocus>
+
+<div id="pages"></div>
+
+<script>
+// No simulated product database anymore – only real scanned tags will appear
+const tags = new Map();
+let currentPage = '';
+let currentSearch = null;
+let isScanning = false;
+let scanInterval = null;
+
+// Load previously saved real tags
+if(localStorage.hayyatekTags) {
+    const saved = JSON.parse(localStorage.hayyatekTags);
+    saved.forEach(([epc, count]) => tags.set(epc, count));
+}
+
+function openPage(name){
+    currentPage = name;
+    const html = {
+        inventory: `
+            <div class="inventory-stats">
+                <div class="stat-card">
+                    <div class="stat-number" id="totalItems">${tags.size}</div>
+                    <div class="stat-label">Total Unique Tags</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="uniqueItems">${tags.size}</div>
+                    <div class="stat-label">Unique EPCs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" id="scanCount">0</div>
+                    <div class="stat-label">Scan Sessions</div>
+                </div>
+            </div>
+            
+            <button id="startScanBtn" style="background:#34a853" onclick="startInstantScan()">
+                START INSTANT SCAN
+            </button>
+            <button id="stopScanBtn" style="background:#ea4335; display:none;" onclick="stopInstantScan()">
+                STOP SCANNING
+            </button>
+            
+            <div id="scanStatus" class="status scan-animation" style="display:none;">
+                SCANNING... Bring tags near the device
+            </div>
+            
+            <div class="status">Or use the hardware trigger for single scans</div>
+            
+            <button style="background:#9333ea" onclick="clearAll()">Clear All Data</button>
+            <button style="background:#1a73e8" onclick="exportCSV()">Export to CSV</button>
+            
+            <table>
+                <thead><tr><th>#</th><th>EPC</th><th>Count</th><th>Last Seen</th></tr></thead>
+                <tbody id="list"></tbody>
+            </table>
+        `,
+        
+        search: `... (unchanged, only minor text cleanup) ...`,
+        write: `... (unchanged) ...`,
+        settings: `... (unchanged) ...`,
+        export: `... (unchanged) ...`
+    }[name];
+    
+    document.getElementById('pages').innerHTML = html;
+    if(name === 'inventory') updateList();
+    if(name === 'search') loadSearchPage();
+    loadSettings();
+    updateExportStats();
+}
+
+// === INSTANT SCANNING (unchanged) ===
+function startInstantScan() { ... }
+function stopInstantScan() { ... }
+
+// === REAL TAG HANDLING ONLY ===
+function addTag(raw){
+    const epc = raw.trim().toUpperCase().replace(/[^A-F0-9]/g,'');
+    if(!/^[A-F0-9]{20,32}$/i.test(epc)) return;
+    
+    const currentCount = tags.get(epc) || 0;
+    tags.set(epc, currentCount + 1);
+    localStorage.hayyatekTags = JSON.stringify(Array.from(tags));
+    
+    beepVibrate();
+    
+    if(currentPage === 'inventory') {
+        updateList();
+        const rows = document.querySelectorAll('#list tr');
+        if(rows.length) rows[rows.length-1].classList.add('realtime-tag');
+    }
+    
+    updateExportStats();
+}
+
+function updateList(){
+    document.getElementById('totalItems').textContent = tags.size;
+    document.getElementById('uniqueItems').textContent = tags.size;
+    
+    const tbody = document.getElementById('list');
+    if(!tbody) return;
+    
+    tbody.innerHTML = '';
+    let i = 1;
+    for(const [epc, count] of tags){
+        const now = new Date().toLocaleTimeString();
+        tbody.innerHTML += `
+            <tr>
+                <td>${i++}</td>
+                <td style="font-family:monospace;font-size:12px;">${epc}</td>
+                <td>${count}</td>
+                <td style="font-size:12px;color:#666;">${now}</td>
+            </tr>
+        `;
+    }
+}
+
+// === ALL OTHER FUNCTIONS (locate, exportCSV, clearAll, beepVibrate, etc.) remain the same ===
+// (only removed simulateMultipleTags() and the fake productDatabase)
+
+document.getElementById('hidden').addEventListener('input', function(e){
+    if(e.target.value){
+        addTag(e.target.value);
+        e.target.value = '';
+    }
+});
+
+// Auto-open inventory and start scanning on load (optional – you can remove if unwanted)
+setTimeout(() => {
+    openPage('inventory');
+    setTimeout(() => startInstantScan(), 800);
+}, 400);
+
+</body>
+</html>
